@@ -11,38 +11,39 @@ class GraphAttentionLayer(nn.Module):
 
     def __init__(self, in_features, out_features, dropout, alpha, concat=True):
         super(GraphAttentionLayer, self).__init__()
-        self.dropout = dropout
-        self.in_features = in_features
-        self.out_features = out_features
-        self.alpha = alpha
+        self.dropout = dropout # 0.6
+        self.in_features = in_features # 1433
+        self.out_features = out_features # 8
+        self.alpha = alpha # 0.2
         self.concat = concat
 
         self.W = nn.Parameter(torch.zeros(size=(in_features, out_features)))
         nn.init.xavier_uniform_(self.W.data, gain=1.414)
-        self.a = nn.Parameter(torch.zeros(size=(2*out_features, 1)))
+        self.a = nn.Parameter(torch.zeros(size=(2*out_features, 1))) #[16,1]
         nn.init.xavier_uniform_(self.a.data, gain=1.414)
 
         self.leakyrelu = nn.LeakyReLU(self.alpha)
 
     def forward(self, input, adj):
-        h = torch.mm(input, self.W)
+        h = torch.mm(input, self.W) #[2708,1433]*[1433,8]
         N = h.size()[0]
-
-        a_input = torch.cat([h.repeat(1, N).view(N * N, -1), h.repeat(N, 1)], dim=1).view(N, -1, 2 * self.out_features)
-        e = self.leakyrelu(torch.matmul(a_input, self.a).squeeze(2))
+        # h.repeat(1, N).view(N * N, -1) 0~(N-1)行相同，N~2N-1行相同，以此类推。[2708*2708，8]
+        # h.repeat(N, 1) 这个是[0:2708,:]==[2708:2*2708,:],---,  [2708*2708,8]
+        a_input = torch.cat([h.repeat(1, N).view(N * N, -1), h.repeat(N, 1)], dim=1).view(N, -1, 2 * self.out_features) #[2708, 2708, 16]
+        e = self.leakyrelu(torch.matmul(a_input, self.a).squeeze(2)) # [2708,2708,16]*[16,1].squeeze()=[2708,2708]
 
         zero_vec = -9e15*torch.ones_like(e)
-        attention = torch.where(adj > 0, e, zero_vec)
+        attention = torch.where(adj > 0, e, zero_vec) #大于0的位置取e,小于0的取-9e15
         attention = F.softmax(attention, dim=1)
         attention = F.dropout(attention, self.dropout, training=self.training)
-        h_prime = torch.matmul(attention, h)
+        h_prime = torch.matmul(attention, h) # 对单个节点的信息用相邻的节点信息去聚合，apha_ij*W*h [2708,8]
 
         if self.concat:
             return F.elu(h_prime)
         else:
             return h_prime
 
-    def __repr__(self):
+    def __repr__(self): # 重构 用来输出类对象的说明/或者是直接输出类对象
         return self.__class__.__name__ + ' (' + str(self.in_features) + ' -> ' + str(self.out_features) + ')'
 
 
